@@ -17,9 +17,11 @@
 package org.apache.kafka.connect.runtime.rest;
 
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.connect.rest.ConnectRestExtension;
 import org.apache.kafka.connect.runtime.Herder;
 import org.apache.kafka.connect.runtime.WorkerConfig;
 import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
+import org.apache.kafka.connect.runtime.isolation.Plugins;
 import org.apache.kafka.connect.util.Callback;
 import org.easymock.Capture;
 import org.easymock.EasyMock;
@@ -32,17 +34,19 @@ import org.powermock.api.easymock.PowerMock;
 import org.powermock.api.easymock.annotation.MockStrict;
 import org.powermock.modules.junit4.PowerMockRunner;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+
 import javax.ws.rs.client.Client;
 import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.client.Invocation;
 import javax.ws.rs.client.WebTarget;
 import javax.ws.rs.core.Response;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 
@@ -51,6 +55,8 @@ public class RestServerTest {
 
     @MockStrict
     private Herder herder;
+    @MockStrict
+    private Plugins plugins;
     private RestServer server;
 
     @After
@@ -58,6 +64,7 @@ public class RestServerTest {
         server.stop();
     }
 
+    @SuppressWarnings("deprecation")
     private Map<String, String> baseWorkerProps() {
         Map<String, String> workerProps = new HashMap<>();
         workerProps.put(DistributedConfig.STATUS_STORAGE_TOPIC_CONFIG, "status-topic");
@@ -83,6 +90,7 @@ public class RestServerTest {
         checkCORSRequest("", "http://bar.com", null, null);
     }
 
+    @SuppressWarnings("deprecation")
     @Test
     public void testParseListeners() {
         // Use listeners field
@@ -102,6 +110,7 @@ public class RestServerTest {
         Assert.assertArrayEquals(new String[] {"http://my-hostname:8080"}, server.parseListeners().toArray());
     }
 
+    @SuppressWarnings("deprecation")
     @Test
     public void testAdvertisedUri() {
         // Advertised URI from listeenrs without protocol
@@ -151,7 +160,18 @@ public class RestServerTest {
 
     public void checkCORSRequest(String corsDomain, String origin, String expectedHeader, String method) {
         // To be able to set the Origin, we need to toggle this flag
+
+        Map<String, String> workerProps = baseWorkerProps();
+        workerProps.put(WorkerConfig.ACCESS_CONTROL_ALLOW_ORIGIN_CONFIG, corsDomain);
+        workerProps.put(WorkerConfig.ACCESS_CONTROL_ALLOW_METHODS_CONFIG, method);
+        WorkerConfig workerConfig = new DistributedConfig(workerProps);
         System.setProperty("sun.net.http.allowRestrictedHeaders", "true");
+
+        EasyMock.expect(herder.plugins()).andStubReturn(plugins);
+        EasyMock.expect(plugins.newPlugins(Collections.emptyList(),
+                                           workerConfig,
+                                           ConnectRestExtension.class))
+            .andStubReturn(Collections.emptyList());
 
         final Capture<Callback<Collection<String>>> connectorsCallback = EasyMock.newCapture();
         herder.connectors(EasyMock.capture(connectorsCallback));
@@ -165,10 +185,7 @@ public class RestServerTest {
 
         PowerMock.replayAll();
 
-        Map<String, String> workerProps = baseWorkerProps();
-        workerProps.put(WorkerConfig.ACCESS_CONTROL_ALLOW_ORIGIN_CONFIG, corsDomain);
-        workerProps.put(WorkerConfig.ACCESS_CONTROL_ALLOW_METHODS_CONFIG, method);
-        WorkerConfig workerConfig = new DistributedConfig(workerProps);
+
         server = new RestServer(workerConfig);
         server.start(herder);
 
